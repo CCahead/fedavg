@@ -88,7 +88,9 @@ def handle_client(clientSocket,addr,num):
             try:
                 # Error during unzip pickle: source code string cannot contain null bytes
                 # modelData = pickle.loads(eval(pckData))
-                print(pckData["conv1.weight"].shape+'\n')
+                print("show the data:\n")
+                print(pckData["conv1.weight"].shape)
+                # Error during unzip pickle: can only concatenate tuple (not "str") to tuple
             except Exception as e:
                 print(f"Error during unzip pickle: {e}")
                 # ServerCount+=1 #TODO test use 
