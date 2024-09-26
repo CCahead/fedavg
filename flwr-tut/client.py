@@ -1,5 +1,6 @@
 
 import pickle
+import time
 import numpy as np
 import torch
 import torch.nn as nn
@@ -42,30 +43,46 @@ class Net(nn.Module):
 
 net = Net()
 
-def clientListen(id,modelData):
+def clientListen(modelData):
+    BUFFER = 4096
+    data = b""
     serverIp = ("localhost",20000)
 
-    clientIp = ("localhost",20000+id) # bind expects a tuple!
-    # clientPort = 20000+id
+    # clientIp = ("localhost",20010+id) # bind expects a tuple!
+    clientIp = socket.gethostbyname("localhost")
+
     print(f"client:{clientIp}")
     client = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-    client.bind(clientIp)
+    # client.bind(clientIp)
     count = 0
+    avgpckModel = dict()
     try:
+        
         modelData  = net.state_dict()
         
         client.connect(serverIp)
-        # client.sendall(pck)
-        with client,client.makefile('wb',buffering=0) as w:
+        with client.makefile('wb',buffering=0) as w:
             pickle.dump(modelData,w)
-        
-        # received = client.recv(1024)
-        # print(received)
+            w.flush() 
+        client.shutdown(socket.SHUT_WR)
+        # time.sleep(10)
+        count +=1
+        print(f"round:{count},model Sent!Waiting for avg Model!")
+        # avoid deadlock! 用makefile方法写 好像会导致死锁？
+        try:
+            while True:
+                packet = client.recv(BUFFER)
+                if not packet: break
+                data+=packet
+            avgpckModel = pickle.loads(data)
+        except Exception as e:
+            print(f"client {clientIp},recv err:{e}")
+        print(avgpckModel)
     except Exception as e:
         print(f"client:{clientIp},err:{e}")
     finally:
         client.close()
-    print(f'Server Connection Closed.{clientIp}')
+    print(f'Client Connection Closed.{clientIp}')
 
     
 transform = transforms.Compose(
@@ -97,4 +114,4 @@ modelData  = net.state_dict()
 # client2.start()
 # client1.start()
 
-clientListen(1,modelData)
+clientListen(modelData)

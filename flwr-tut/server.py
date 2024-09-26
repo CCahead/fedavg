@@ -7,7 +7,7 @@ import torchvision
 import torch.nn.functional as F
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
-from threading import Thread 
+from threading import Condition, Thread 
 import json
 import socket
 
@@ -41,100 +41,92 @@ class Net(nn.Module):
         x = self.fc3(x)
         return x
 
-net = Net()
 
-ServerCount = 0
-clientPool = dict()
-clientBase = 20000
-serverIp = ("localhost",20000)
 # https://stackoverflow.com/questions/73673011/how-do-you-send-multiple-objects-using-pickle-using-socket
-def recvall(clientSocket):
-    
-    # BUFF_SIZE = 4096
-    # data = b""#  'x95x42x55x00usb.' 要再做一次转换？把str转换成hex？
+
+def serverTrain():
+    return 
+
+def recvall(connection):
+
     try:
-        with clientSocket,clientSocket.makefile('rb') as r:
-            while True:
+        with connection.makefile('rb') as r:
+            while True:    
                 try:
                     data = pickle.load(r)
                 except EOFError:
+                    print("End of file reached.") #这个try catch就有点像多线程读写同一个list用except Empty控制条件
                     break
-                print(data)
-    #     while True:
-            
-    #         part = clientSocket.recv(BUFF_SIZE)
-    #         data += part
-    #         if len(part)<BUFF_SIZE:
-    #             break # goto the end 
     except Exception as e:
         print(f"err during recv:{e}")
-    return data # original is return data
-def handle_client(clientSocket,addr,num):
-    global ServerCount # [1,totalRound]
-    global clientPool
-    global clientBase
+    # original is return data
+    return data
+def handle_client(connection,addr):
     try:
 # Connection Estabilished with clientIp:('127.0.0.1', 20001)
         
         print(f"Connection Estabilished with clientIp:{addr}")
-        port = addr[1] # addr is a tuple: (host,port)
-        clientPool[port]=clientPool[port]+1 # update client Status
-        Flag = True
-        for i in range(0,num):
-            clientId = clientBase+i+1
-            clientRound = clientPool[clientId]
             
-            pckData = recvall(clientSocket)
-            try:
-                # Error during unzip pickle: source code string cannot contain null bytes
-                # modelData = pickle.loads(eval(pckData))
-                print("show the data:\n")
-                print(pckData["conv1.weight"].shape)
-                # Error during unzip pickle: can only concatenate tuple (not "str") to tuple
-            except Exception as e:
-                print(f"Error during unzip pickle: {e}")
-                # ServerCount+=1 #TODO test use 
-            if(clientRound != ServerCount):
-                Flag = False  # find out if this round is over. we have a dict to present.
-            print(f'Connected with: {port}, round: {ServerCount}')
-                            
-            
-        if(Flag):
-            ServerCount+=1 #Update ServerCount! 这里有效嘛？如果我在线程内部更新全局变量的话，全局变量会改变吗？
-            # 在server主线程看到的ServerCount会变吗？
-    except Exception as e:
-        print(f"Error happened during handle request{e}")
-    # clientSocket.recv(1024)
+        pckData = recvall(connection)
+        try:
+            print("show the data:\n")
+            print(pckData["conv1.weight"].shape)
+        except Exception as e:
+            print(f"Error during unzip pickle: {e}")
 
-def serverListen(num,totalRound):
-    global ServerCount
-    global clientPool
-    global clientBase
+    except Exception as e:
+        print(f"Error happened during handle request:{addr},{e}")
+    return pckData
+
+def serverListen(clientNum,totalRound):
+    clientPool = []
     global serverIp
     print(f"server:{serverIp}")
     server = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
     server.bind(serverIp)
-    for i in range(0,num):
-        clinetId = clientBase+i+1 
-        clientPool[clinetId] = 0
     server.listen(10)
-
+    round = 0
+    step = 0 
+    avgpckData = dict()
     try:
         while(True):
-            print(f"server:{serverIp},round:{ServerCount}")
+            print(step,round)
             #  lock
-            if(ServerCount ==totalRound):
+            if(round ==totalRound): # if reach maxRound, stop and broadcasting again
+                
                 break
-            #  1. 发送一次普通文件，
-            clientSocket, addr = server.accept()
+            print(f"server:{serverIp},round:{round}")
+            connection, addr = server.accept()
+            clientPool.append(connection)
+            pckData=handle_client(connection,addr)
+            step +=1 # I received a client model!
+            print(f"finished:{step}")
             
-            thread = Thread(target=handle_client, args=(clientSocket, addr,num))
-            thread.start()
-            
-            # for i in range(0,num):
-            #     clientId = clientBase+i+1
-            #     print(f"clientPool:clientid:{clientId}:round:{clientPool[clientId]}")
-            
+            # if(step==0): # initial avgModel 
+            #     avgpckData = serverTrain()
+            if(step==1): # initial avgModel 
+                avgpckData = pckData.copy()
+            elif(step>1):
+                for k,v in avgpckData.items():
+                    avgpckData[k] = avgpckData[k] + pckData[k]
+            #  1. if a client send a model
+            if(step==clientNum):
+                step =0 # reset the connection , avg the model and broadcasting
+                round +=1
+                print(avgpckData["fc3.bias"])
+                for k,v in avgpckData.items():
+                    
+                    avgpckData[k] = avgpckData[k]/clientNum # ave the weights
+                print(avgpckData["fc3.bias"])
+
+                for connection in clientPool:
+                    with connection.makefile('wb',buffering=0) as w:
+                        pickle.dump(avgpckData,w)
+                        w.flush()
+                    connection.shutdown(socket.SHUT_WR)
+                    print(f"Avg model has sent")
+                        
+            print(f"finished:{step}")
             
     except Exception as e:
         print(f"Error: {e}")
@@ -143,5 +135,7 @@ def serverListen(num,totalRound):
         server.close()
         print("Server closed")
 
+net = Net()
 
-serverListen(1,1)
+serverIp = ("localhost",20000)
+serverListen(2,1)
