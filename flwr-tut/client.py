@@ -65,11 +65,12 @@ def clientListen(modelData):
             pickle.dump(modelData,w)
             w.flush() 
         client.shutdown(socket.SHUT_WR)
-        # time.sleep(10)
-        count +=1
         print(f"round:{count},model Sent!Waiting for avg Model!")
         # avoid deadlock! 用makefile方法写 好像会导致死锁？
         try:
+            # https://stackoverflow.com/questions/44637809/python-3-6-socket-pickle-data-was-truncated
+            # before reading this I use the same way like server reading data: use makefile
+            # but it would cause block and broken file condition. So, I pivot my strategy,use this again.
             while True:
                 packet = client.recv(BUFFER)
                 if not packet: break
@@ -77,12 +78,13 @@ def clientListen(modelData):
             avgpckModel = pickle.loads(data)
         except Exception as e:
             print(f"client {clientIp},recv err:{e}")
-        print(avgpckModel)
+        print(avgpckModel["fc3.bias"])
     except Exception as e:
         print(f"client:{clientIp},err:{e}")
     finally:
         client.close()
     print(f'Client Connection Closed.{clientIp}')
+    return modelData
 
     
 transform = transforms.Compose(
@@ -113,5 +115,7 @@ modelData  = net.state_dict()
 # client2 = Thread(target=clientListen,args=(2,pck))
 # client2.start()
 # client1.start()
-
-clientListen(modelData)
+count = 1
+while(count<=2):
+    modelData= clientListen(modelData)
+    count +=1

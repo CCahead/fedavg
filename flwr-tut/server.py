@@ -125,6 +125,7 @@ def serverListen(clientNum,totalRound):
                         w.flush()
                     connection.shutdown(socket.SHUT_WR)
                     print(f"Avg model has sent")
+                clientPool[:] = [] #reset clientPool
                         
             print(f"finished:{step}")
             
@@ -138,4 +139,4 @@ def serverListen(clientNum,totalRound):
 net = Net()
 
 serverIp = ("localhost",20000)
-serverListen(2,1)
+serverListen(2,2)
