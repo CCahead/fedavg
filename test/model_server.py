@@ -1,3 +1,4 @@
+import pickle
 
 import socket
 import time
@@ -7,33 +8,37 @@ server.bind(serverIp)
 server.listen(10)
 buf = 1024
 modelData = b""
-msg_cls = b"close"
-msg_upload = b"upload"
-msg_init = b"init"
+msg_cls = "close"
+msg_upload = "upload"
+msg_init = "init"
 connection, addr = server.accept()
-
+round = 0
 while True:
     try:
-        # print("wait...\n")
         data = connection.recv(buf)
-        # print("recv...\n")
-        if data == msg_cls:
+        tmp = pickle.loads(data) 
+        # two possibles: 1. it's part of dict(model data) 2. it's condition
+        if tmp == msg_cls:
             print("closing!")
             connection.close()
             break
-        elif data ==msg_upload:
-            connection.send(b"plz waiting")
-        elif data == msg_init:
-            connection.send(b"plz waiting Im training data!")
-        elif data != b"":
-            modelData += data
-            print(f"model received:{len(modelData)}")
+        elif tmp ==msg_upload:
+            connection.send(pickle.dumps("plz waiting"))
+        elif tmp == msg_init:
+            connection.send(pickle.dumps("plz waiting Im training data!"))
+        elif tmp != "":
+            modelData += data 
             
             # time.sleep(3)
             if len(data)<buf:
-                time.sleep(10)
-                connection.send(b"data received") # 之前没这一条，好像就会死锁？
-                connection.send(b"abcdeeeeee")
+                round +=1
+                print(f"model received:{pickle.loads(modelData)}")
+
+                connection.send(pickle.dumps(f"round{round}")) # 之前没这一条，好像就会死锁？
+                if round ==3:
+                    print("reach max round,closing!")
+                    connection.close()
+                    break
             #  加入之后就好了！好像是的！一边发送完消息他其实是在等待这边的通信？
             # in this condition, only data being fully received, server send response.
             #  Server   Client 
