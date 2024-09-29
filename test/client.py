@@ -33,4 +33,9 @@ while True:
         break
 
 print("finish!")
-    
+
+
+# 4096
+# You entered: 4096
+# server msg:b''
+# finish!
