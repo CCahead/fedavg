@@ -1,5 +1,6 @@
 
 import pickle
+import random
 import time
 import numpy as np
 import torch
@@ -11,111 +12,163 @@ from torch.utils.data import DataLoader
 from threading import Thread 
 import json
 import socket
+import torch.optim as optim
+from model import Net
 
-class Net(nn.Module):
-    def __init__(self):
-        # in_channels (int): Number of channels in the input image
-        # out_channels (int): Number of channels produced by the convolution
-        # kernel_size (int or tuple): Size of the convolving kernel
-        # stride (int or tuple, optional): Stride of the convolution. Default: 1
-        # padding (int, tuple or str, optional): Padding added to all four sides of
-        #     the input. Default: 0
-        super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(3, 6, 5)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(6, 16, 5)
-        # self.fc1 = nn.Linear(16 * 4 * 4, 120)  # 根据计算调整维度
-        self.fc1 = nn.Linear(16 * 5 * 5, 120) #这里
-        self.fc2 = nn.Linear(120, 84)
-        self.fc3 = nn.Linear(84, 10)
-
-    def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))
-        # print("After conv1 and pool:", x.shape)
-        x = self.pool(F.relu(self.conv2(x)))
-        # print("After conv2 and pool:", x.shape)
-        x = torch.flatten(x, 1) # flatten all dimensions except batch
-        # print("After flatten:", x.shape)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = self.fc3(x)
-        return x
-
-net = Net()
-
-def clientListen(modelData):
-    BUFFER = 4096
-    data = b""
-    serverIp = ("localhost",20000)
-
-    # clientIp = ("localhost",20010+id) # bind expects a tuple!
-    clientIp = socket.gethostbyname("localhost")
-
-    print(f"client:{clientIp}")
-    client = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-    # client.bind(clientIp)
-    count = 0
-    avgpckModel = dict()
+def pull(client):
+    modelData = dict()
+    data = b''
+    global BUFFER
+    
     try:
         
-        modelData  = net.state_dict()
-        
-        client.connect(serverIp)
-        with client.makefile('wb',buffering=0) as w:
-            pickle.dump(modelData,w)
-            w.flush() 
-        client.shutdown(socket.SHUT_WR)
-        print(f"round:{count},model Sent!Waiting for avg Model!")
-        # avoid deadlock! 用makefile方法写 好像会导致死锁？
-        try:
             # https://stackoverflow.com/questions/44637809/python-3-6-socket-pickle-data-was-truncated
             # before reading this I use the same way like server reading data: use makefile
             # but it would cause block and broken file condition. So, I pivot my strategy,use this again.
-            while True:
-                packet = client.recv(BUFFER)
-                if not packet: break
-                data+=packet
-            avgpckModel = pickle.loads(data)
-        except Exception as e:
-            print(f"client {clientIp},recv err:{e}")
-        print(avgpckModel["fc3.bias"])
+        while True:
+            packet = client.recv(BUFFER)
+            if packet != b"":
+                data += packet
+                if len(packet)<BUFFER:
+                    break
+            #    ROUND0EPOCHES1
+            # roundb'\x00',epochesb'R' error
+        round,epoches,modelData = pickle.loads(data)
     except Exception as e:
-        print(f"client:{clientIp},err:{e}")
-    finally:
-        client.close()
-    print(f'Client Connection Closed.{clientIp}')
-    return modelData
-
+        print(f"client recv err:{e}")
     
-transform = transforms.Compose(
+    return round,epoches,modelData
+def push(client,num,modelData):
+    try:
+        print(f"round:{num},Client:{ID} model Sent!Waiting for avg Model!")
+        msg = [num,ID,modelData]
+        msg = pickle.dumps(msg)
+        client.sendall(msg)
+    except Exception as e:
+        print(f"client:err:{e}")
+    return 
+
+def connection():
+    serverIp = ("localhost",20000)
+    # clientIp = ("localhost",20010+id) # bind expects a tuple!
+    client = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+    client.connect(serverIp)
+    return client
+
+def train(modelData,epoches):
+    model = Net()
+    model.load_state_dict(state_dict=modelData)
+    criterion = nn.CrossEntropyLoss()
+
+    optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+    
+    for epoch in range(epoches):  # loop over the dataset multiple times
+
+        running_loss = 0.0
+        for i, data in enumerate(trainloader, 0):
+            # get the inputs; data is a list of [inputs, labels]
+            inputs, labels = data
+
+            # zero the parameter gradients
+            optimizer.zero_grad()
+
+            # forward + backward + optimize
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
+            # print statistics
+            running_loss += loss.item()
+            if i % 500 == 499:    # print every 500 mini-batches
+                print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / 500:.3f}')
+                running_loss = 0.0
+
+    return model.state_dict()
+
+
+def test(round,modelData):
+    dataiter = iter(testloader)
+    images, labels = next(dataiter)
+    net = Net()
+    net.load_state_dict(state_dict=modelData)
+    outputs = net(images)
+    _, predicted = torch.max(outputs, 1)
+
+    print('Predicted: ', ' '.join(f'{classes[predicted[j]]:5s}'
+                                for j in range(4)))
+    correct = 0
+    total = 0
+# since we're not training, we don't need to calculate the gradients for our outputs
+    with torch.no_grad():
+        for data in testloader:
+            images, labels = data
+            # calculate outputs by running images through the network
+            outputs = net(images)
+            # the class with the highest energy is what we choose as prediction
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+    print(f'Round:{round},acc: {100 * correct // total} %')
+# *** init ***
+if __name__ == '__main__':
+    BUFFER = 4096
+    CLIENT_HEAD = "CLIENT"
+    METHOD_HEAD = "METHOD"
+    ROUND_HEAD = "ROUND"
+    PUSH = "PUSH"
+    PULL = "PULL"
+    FINISHED = "FINISHED"
+    EPOCHES_HEAD = "EPOCHES"
+    
+    EPOCHES_LENGTH = 1
+    ROUND_LENGTH = 1
+    # NUM_ROUND = 2
+    INIT_ROUND = 1
+    ID = random.randint(1, 5)
+    count = 1
+    epoches = 1
+    transform = transforms.Compose(
     [transforms.ToTensor(),
-     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    # batch_size = 4  # to simulate different data distribution,it could varies
+    batch_size = 2**(random.randint(2,5)) # [2,32]
 
-batch_size = 32
+    trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
+                                            download=True, transform=transform)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
+                                            shuffle=True, num_workers=2)
 
-trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
+    testset = torchvision.datasets.CIFAR10(root='./data', train=False,
                                         download=True, transform=transform)
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
-                                          shuffle=True, num_workers=2)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
+                                            shuffle=False, num_workers=2)
 
-testset = torchvision.datasets.CIFAR10(root='./data', train=False,
-                                       download=True, transform=transform)
-testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
-                                         shuffle=False, num_workers=2)
-
-classes = ('plane', 'car', 'bird', 'cat',
-           'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-
-
-modelData  = net.state_dict()
-
-# pck = pickle.dumps(modelData)
-
-# client1 = Thread(target=clientListen,args=(1,pck))
-# client2 = Thread(target=clientListen,args=(2,pck))
-# client2.start()
-# client1.start()
-count = 1
-while(count<=2):
-    modelData= clientListen(modelData)
-    count +=1
+    classes = ('plane', 'car', 'bird', 'cat',
+            'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+    client = connection()
+    
+    
+    
+    # *** init ***
+    Init = False
+    while True:
+        Round,Epoches,modelData = pull(client)
+        if Init == False:
+            Round =  abs(Round)
+            NUM_ROUND = Round
+            Round = INIT_ROUND
+            Init = True
+        print(f"Total round:{NUM_ROUND},client round:{Round},Epoches:{Epoches},BatchSize:{batch_size}")
+        
+        modelData = train(modelData,Epoches) 
+        push(client,count,modelData)
+        test(round,modelData)
+        if NUM_ROUND==Round:
+            # msg = "finished"
+            # msg = pickle.dumps(msg)
+            # client.send(msg)
+            client.close()
+            break
+    print("finished")
