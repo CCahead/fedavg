@@ -1,4 +1,5 @@
 # RUN GUIDE
+first run flwr-tut/server.py, and then open two terminal run flwr-tut/client.py as clients
 in server.py main function:
 ```python
     NUM_ROUND = 3 # stands for total transmission round
