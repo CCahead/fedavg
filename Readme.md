@@ -1,3 +1,28 @@
+# RUN GUIDE
+in server.py main function:
+```python
+    NUM_ROUND = 3 # stands for total transmission round
+    INIT_ROUND = 1 # stands for init round 
+    CLIENTPOOL = 2 # how many client could connect
+    epoches = 1 # train epoches/ client epoches per transmission
+   # change this variables to set the training procedure.
+   # NUM_ROUND: max transmission round 
+   # CLIENTPOOL: max client connection
+   # epoches: max epoches client would train per transmission
+   #
+```
+## NOTE 
+in server side, the default batch size is 32. batch size in client size is random picked from 4 to 32.
+This code contains three parts: model,client and server. 
+Training Procedure per transmission round:
+
+Client   Server
+pull<=====broadcast
+push=====>recvModel
+--------------------
+
+
+
 # tcp block machanism
 by default, after call recv, it would block until it receives a response from remote site.
 https://www.scottklement.com/rpg/socktut/nonblocking.html#:~:text=The%20solution%20to%20this%20problem%20is
