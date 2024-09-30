@@ -7,6 +7,9 @@ client.connect(serverIp)
 recvData = b""
 condition = True
 ROUND = "round"
+METHOD= "method"
+train_and_upload = "T&U"
+wait_broadcast = "W&B"
 while True:
     try:
 
@@ -17,7 +20,7 @@ while True:
         pck = pickle.dumps(s_dict)
         client.sendall(pck) # 
         
-        # *** sychronized ***
+        # *** synchronized ***
         while True:
             
             data = client.recv(1024)
@@ -28,15 +31,26 @@ while True:
                     client.close()
                     condition = False
                     break 
-                pos_round = tmp.find(ROUND)
-                if pos_round!= -1:
+                pos_round_head = tmp.find(ROUND)
+                if pos_round_head!= -1:
                     # round = tmp[pos_round+len(ROUND)+1:]
-                    round = tmp[pos_round+len(ROUND):]
+                    pos_round= pos_round_head+len(ROUND)
+                    round = tmp[pos_round:pos_round+1]
                     print(tmp,":",round)
                     if round == "3": # reach max round
                         client.close()
                         condition = False
                         break 
+                    pos_method_head = pos_round+1
+                    pos_method = pos_method_head + len(METHOD)
+                    method = tmp[pos_method:]
+                    if method == wait_broadcast:
+                        print(wait_broadcast)
+                    elif method == train_and_upload:
+                        print(train_and_upload)
+                    else:
+                        print("default")
+            #   round{round}method{method}
                 # *** condition control***
                 # *** recv data ***
                 

@@ -11,6 +11,11 @@ modelData = b""
 msg_cls = "close"
 msg_upload = "upload"
 msg_init = "init"
+
+ROUND = "round"
+METHOD= "method"
+train_and_upload = "T&U"
+wait_broadcast = "W&B"
 connection, addr = server.accept()
 round = 0
 while True:
@@ -33,9 +38,16 @@ while True:
             if len(data)<buf:
                 round +=1
                 print(f"model received:{pickle.loads(modelData)}")
-
-                connection.send(pickle.dumps(f"round{round}")) # 之前没这一条，好像就会死锁？
+                if round == 1:
+                    method = train_and_upload
+                    msg = pickle.dumps(f"round{round}method{method}")
+                    connection.send(msg)
+                if round == 2:
+                    method = wait_broadcast
+                    msg = pickle.dumps(f"round{round}method{method}")
+                    connection.send(msg)
                 if round ==3:
+                    connection.send(pickle.dumps(f"round{round}")) # 之前没这一条，好像就会死锁？
                     print("reach max round,closing!")
                     connection.close()
                     break
